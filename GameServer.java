@@ -1,100 +1,144 @@
 import java.io.*;
 import java.net.*;
 import java.util.*;
-import java.util.concurrent.*;
 import java.util.concurrent.locks.*;
 
 public class GameServer {
-    private final int port;
-    private ServerSocket serverSocket;
-    private final Map<String, User> users = new ConcurrentHashMap<>();
-    private final Map<String, User> authenticatedUsers = new ConcurrentHashMap<>();
-    private final List<Game> games = new ArrayList<>();
-    private final Lock gamesLock = new ReentrantLock();
-
-    public GameServer(int port) {
-        this.port = port;
-    }
-
-    public void start() throws IOException {
-        serverSocket = new ServerSocket(port);
-        System.out.println("Server started on port " + port);
-        while (true) {
-            Socket clientSocket = serverSocket.accept();
-            new ClientHandler(clientSocket, this).start();
-        }
-    }
+    private static final int PORT = 12345;
+    private static final int PLAYERS_PER_GAME = 2; // Adjust as needed
+    private static Map<String, String> userCredentials = new HashMap<>();
+    private static List<ClientHandler> waitingPlayers = new ArrayList<>();
+    private static ReentrantLock lock = new ReentrantLock();
 
     public static void main(String[] args) {
-        int port = 12345; // default port
-        if (args.length > 0) {
-            port = Integer.parseInt(args[0]);
-        }
-        try {
-            new GameServer(port).start();
+        loadUserCredentials();
+        try (ServerSocket serverSocket = new ServerSocket(PORT)) {
+            System.out.println("Game server started...");
+            while (true) {
+                Socket clientSocket = serverSocket.accept();
+                System.out.println("New client connected: " + clientSocket.getInetAddress().getHostAddress());
+                new Thread(new ClientHandler(clientSocket)).start();
+            }
         } catch (IOException e) {
-            System.err.println("Server failed to start: " + e.getMessage());
+            e.printStackTrace();
         }
     }
 
-    // User authentication and management
-    public boolean authenticate(String username, String password) {
-        User user = users.get(username);
-        if (user != null && user.getPassword().equals(password)) {
-            authenticatedUsers.put(username, user);
-            return true;
+    private static void loadUserCredentials() {
+        // Load user credentials from a file or create dummy data
+        userCredentials.put("ian", "ian090903");
+        userCredentials.put("user1", "pass1");
+        userCredentials.put("user2", "pass2");
+        // Add more users as needed
+    }
+
+    public static class ClientHandler implements Runnable {
+        private Socket clientSocket;
+        private String username;
+        private ObjectOutputStream out;
+        private ObjectInputStream in;
+
+        public ClientHandler(Socket socket) {
+            this.clientSocket = socket;
         }
-        return false;
-    }
 
-    // Game session management
-    public void startGame(List<User> players) {
-        Game game = new Game(players.size(), new ArrayList<>(players));
-        gamesLock.lock();
-        try {
-            games.add(game);
-        } finally {
-            gamesLock.unlock();
+        public void run() {
+            try {
+                out = new ObjectOutputStream(clientSocket.getOutputStream());
+                out.flush(); // Ensure stream header is sent immediately
+                in = new ObjectInputStream(clientSocket.getInputStream());
+                System.out.println("Streams initialized for client: " + clientSocket.getInetAddress().getHostAddress());
+
+                // Authenticate user
+                authenticateUser();
+
+                // Add user to the waiting queue
+                addPlayerToQueue();
+
+                // Inform user to wait for the game to start
+                out.writeObject("Please wait until enough players are available to start the game...");
+                out.flush();
+                System.out.println("User " + username + " added to queue and informed to wait.");
+
+                // Keep the connection open while waiting for the game to start
+                synchronized (this) {
+                    wait();
+                }
+
+            } catch (IOException | ClassNotFoundException | InterruptedException e) {
+                System.err.println("Error during client handling: " + e.getMessage());
+                e.printStackTrace();
+            } finally {
+                closeResources();
+            }
         }
-        new Thread(game::start).start();
-    }
-}
 
-class ClientHandler extends Thread {
-    private final Socket socket;
-    private final GameServer server;
-    private User user;
+        private void authenticateUser() throws IOException, ClassNotFoundException {
+            while (true) {
+                System.out.println("Prompting user for username...");
+                out.writeObject("Enter username: ");
+                out.flush();
+                String username = (String) in.readObject();
+                System.out.println("Received username: " + username);
+                out.writeObject("Enter password: ");
+                out.flush();
+                String password = (String) in.readObject();
+                System.out.println("Received password for user " + username);
 
-    public ClientHandler(Socket socket, GameServer server) {
-        this.socket = socket;
-        this.server = server;
-    }
+                // Logging the values being compared for authentication
+                System.out.println("Comparing with stored credentials: " + userCredentials.get(username));
 
-    @Override
-    public void run() {
-        try (ObjectInputStream input = new ObjectInputStream(socket.getInputStream());
-             ObjectOutputStream output = new ObjectOutputStream(socket.getOutputStream())) {
-
-            // Handle user authentication
-            Object obj = input.readObject();
-            if (obj instanceof String) {
-                String[] credentials = ((String) obj).split(":");
-                if (credentials.length == 2 && server.authenticate(credentials[0], credentials[1])) {
-                    user = new User(credentials[0], credentials[1]);
-                    output.writeObject("Authenticated");
-                    // Further communication
+                if (userCredentials.containsKey(username) && userCredentials.get(username).equals(password)) {
+                    this.username = username;
+                    System.out.println("User authenticated: " + username);  // Log the username
+                    out.writeObject("Authentication successful.");
+                    out.flush();
+                    break;
                 } else {
-                    output.writeObject("Authentication Failed");
+                    System.out.println("Authentication failed for user: " + username);
+                    out.writeObject("Authentication failed. Try again.");
+                    out.flush();
                 }
             }
+        }
 
-        } catch (IOException | ClassNotFoundException e) {
-            System.err.println("Error handling client: " + e.getMessage());
-        } finally {
+        private void addPlayerToQueue() throws IOException {
+            lock.lock();
             try {
-                socket.close();
+                waitingPlayers.add(this);
+                if (waitingPlayers.size() >= PLAYERS_PER_GAME) {
+                    startGame();
+                }
+            } finally {
+                lock.unlock();
+            }
+        }
+
+        private void startGame() {
+            List<ClientHandler> gamePlayers = new ArrayList<>();
+            for (ClientHandler handler : waitingPlayers.subList(0, PLAYERS_PER_GAME)) {
+                gamePlayers.add(handler);
+            }
+            waitingPlayers.subList(0, PLAYERS_PER_GAME).clear();
+            LudoGame game = new LudoGame(PLAYERS_PER_GAME, gamePlayers);
+            new Thread(game).start();
+        }
+
+        public ObjectOutputStream getOut() {
+            return out;
+        }
+
+        public ObjectInputStream getIn() {
+            return in;
+        }
+
+        private void closeResources() {
+            try {
+                if (out != null) out.close();
+                if (in != null) in.close();
+                if (clientSocket != null) clientSocket.close();
             } catch (IOException e) {
-                System.err.println("Error closing socket: " + e.getMessage());
+                e.printStackTrace();
             }
         }
     }

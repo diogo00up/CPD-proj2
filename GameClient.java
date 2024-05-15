@@ -2,42 +2,63 @@ import java.io.*;
 import java.net.*;
 
 public class GameClient {
-    private Socket socket;
-    private ObjectOutputStream output;
-    private ObjectInputStream input;
-
-    public GameClient(String host, int port) {
-        try {
-            socket = new Socket(host, port);
-            output = new ObjectOutputStream(socket.getOutputStream());
-            input = new ObjectInputStream(socket.getInputStream());
-        } catch (IOException e) {
-            System.err.println("Failed to connect to server: " + e.getMessage());
-        }
-    }
-
-    public void authenticate(String username, String password) throws IOException {
-        output.writeObject(username + ":" + password);
-        try {
-            Object response = input.readObject();
-            if (response instanceof String) {
-                System.out.println(response);
-            }
-        } catch (ClassNotFoundException e) {
-            System.err.println("Unknown data received from server: " + e.getMessage());
-        }
-    }
+    private static final String SERVER_ADDRESS = "localhost";
+    private static final int SERVER_PORT = 12345;
 
     public static void main(String[] args) {
-        if (args.length != 3) {
-            System.out.println("Usage: java GameClient <host> <port> <username:password>");
-            return;
-        }
-        GameClient client = new GameClient(args[0], Integer.parseInt(args[1]));
-        try {
-            client.authenticate(args[2].split(":")[0], args[2].split(":")[1]);
-        } catch (IOException e) {
-            System.err.println("Authentication failed: " + e.getMessage());
+        try (Socket socket = new Socket(SERVER_ADDRESS, SERVER_PORT);
+             ObjectOutputStream out = new ObjectOutputStream(socket.getOutputStream());
+             ObjectInputStream in = new ObjectInputStream(socket.getInputStream());
+             BufferedReader reader = new BufferedReader(new InputStreamReader(System.in))) {
+
+            out.flush(); // Ensure stream header is sent immediately
+            System.out.println("Connected to the game server.");
+
+            // Authentication
+            String response;
+            while (true) {
+                response = (String) in.readObject();
+                System.out.print(response);
+                String username = reader.readLine();
+                out.writeObject(username);
+                out.flush();
+
+                response = (String) in.readObject();
+                System.out.print(response);
+                String password = reader.readLine();
+                out.writeObject(password);
+                out.flush();
+
+                response = (String) in.readObject();
+                System.out.println(response);
+                if (response.equals("Authentication successful.")) {
+                    break;
+                }
+            }
+
+            // Waiting for the game to start
+            while (true) {
+                response = (String) in.readObject();
+                System.out.println(response);
+                if (response.contains("Game started")) {
+                    break;
+                }
+            }
+
+            // Playing the game
+            while (true) {
+                response = (String) in.readObject();
+                System.out.println(response);
+
+                if (response.contains("Your turn")) {
+                    String command = reader.readLine();
+                    out.writeObject(command);
+                    out.flush();
+                }
+            }
+
+        } catch (IOException | ClassNotFoundException e) {
+            e.printStackTrace();
         }
     }
 }
