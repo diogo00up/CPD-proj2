@@ -4,7 +4,6 @@ import java.util.*;
 public class LudoGame implements Runnable {
     private int numPlayers;
     private List<Player> players;
-    private int currentPlayerIndex;
     private List<ObjectOutputStream> outputStreams;
     private List<ObjectInputStream> inputStreams;
 
@@ -15,82 +14,61 @@ public class LudoGame implements Runnable {
         this.inputStreams = new ArrayList<>();
         for (int i = 0; i < numPlayers; i++) {
             players.add(new Player("Player" + (i + 1)));
-            try {
-                outputStreams.add(handlers.get(i).getOut());
-                inputStreams.add(handlers.get(i).getIn());
-            } catch (Exception e) {
-                e.printStackTrace();
-            }
+            outputStreams.add(handlers.get(i).getOut());
+            inputStreams.add(handlers.get(i).getIn());
         }
-        this.currentPlayerIndex = 0;
     }
 
     @Override
     public void run() {
-        start();
-    }
-
-    public void start() {
-        System.out.println("Starting game with " + numPlayers + " players");
-        for (int i = 0; i < numPlayers; i++) {
-            final int playerIndex = i;
-            new Thread(() -> handlePlayer(playerIndex)).start();
-        }
-    }
-
-    private void handlePlayer(int playerIndex) {
-        Player player = players.get(playerIndex);
-        ObjectOutputStream out = outputStreams.get(playerIndex);
-        ObjectInputStream in = inputStreams.get(playerIndex);
-
+        int currentPlayerIndex = 0;
         try {
-            while (true) {
-                synchronized (this) {
-                    while (players.get(currentPlayerIndex) != player) {
-                        wait();
-                    }
-                }
+            while (!isGameOver()) {
+                Player currentPlayer = players.get(currentPlayerIndex);
+                ObjectOutputStream out = outputStreams.get(currentPlayerIndex);
+                ObjectInputStream in = inputStreams.get(currentPlayerIndex);
 
-                // Notify the player that it's their turn
                 out.writeObject("It's your turn. Roll the die (type 'roll')");
                 out.flush();
 
-                // Wait for the player to roll the die
+                System.out.println("Waiting for command from Player " + (currentPlayerIndex + 1));
+
                 String command = (String) in.readObject();
+                System.out.println("Received command from Player " + (currentPlayerIndex + 1) + ": " + command);
+
                 if ("roll".equalsIgnoreCase(command)) {
                     int roll = rollDie();
+                    System.out.println("Player " + (currentPlayerIndex + 1) + " rolled a " + roll);
                     out.writeObject("You rolled a " + roll);
                     out.flush();
-                    player.moveToken(roll);
-
-                    // Update all players with the new game state
+                    currentPlayer.moveToken(roll);
                     updateAllPlayers();
-
-                    // Check for a win condition
-                    if (player.hasWon()) {
-                        out.writeObject("You won!");
-                        out.flush();
-                        break;
-                    }
-                }
-
-                // Move to the next player
-                synchronized (this) {
                     currentPlayerIndex = (currentPlayerIndex + 1) % numPlayers;
-                    notifyAll();
+                } else {
+                    out.writeObject("Invalid command. Please type 'roll'");
+                    out.flush();
                 }
             }
-        } catch (IOException | ClassNotFoundException | InterruptedException e) {
+        } catch (Exception e) {
+            System.err.println("Error during game execution: " + e.getMessage());
             e.printStackTrace();
-        } finally {
-            closeResources(playerIndex);
         }
     }
 
+    private boolean isGameOver() {
+        for (Player player : players) {
+            if (player.hasWon()) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     private void updateAllPlayers() {
+        String gameState = getGameState();
         for (ObjectOutputStream out : outputStreams) {
             try {
-                out.writeObject("Game state updated: " + getGameState());
+                out.writeObject("Game state updated: " + gameState);
                 out.flush();
             } catch (IOException e) {
                 e.printStackTrace();
@@ -101,22 +79,13 @@ public class LudoGame implements Runnable {
     private String getGameState() {
         StringBuilder gameState = new StringBuilder();
         for (Player player : players) {
-            gameState.append(player.getName()).append(": ").append(player.getPosition()).append("\n");
+            gameState.append(player.getName()).append(": Position ").append(player.getPosition()).append("\n");
         }
         return gameState.toString();
     }
 
     private int rollDie() {
         return new Random().nextInt(6) + 1;
-    }
-
-    private void closeResources(int playerIndex) {
-        try {
-            if (outputStreams.get(playerIndex) != null) outputStreams.get(playerIndex).close();
-            if (inputStreams.get(playerIndex) != null) inputStreams.get(playerIndex).close();
-        } catch (IOException e) {
-            e.printStackTrace();
-        }
     }
 
     static class Player {
@@ -141,7 +110,7 @@ public class LudoGame implements Runnable {
         }
 
         public boolean hasWon() {
-            return position >= 100; // Example win condition
+            return position >= 100; // Assuming 100 is the win condition
         }
     }
 }
