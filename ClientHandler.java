@@ -3,31 +3,37 @@ import java.net.Socket;
 import java.net.SocketException;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.Random;
 import java.util.UUID;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
 public class ClientHandler implements Runnable {
-    private final Socket clientSocket;    // The socket connected to the client.
-    private final GameServer server;      // Reference to the GameServer instance to manage the client
-    private BufferedReader in;       // BufferedReader for reading input from the client
-    private PrintWriter out;          // PrintWriter for sending output to the client.
-    private static final Logger logger = Logger.getLogger(ClientHandler.class.getName());  // Logger to log activities related to the client handler.
-    private static final Map<String, String> userDatabase = new HashMap<>(); // Mock user database
+    private final Socket clientSocket;
+    private final GameServer server;
+    private BufferedReader in;
+    PrintWriter out;
+    private static final Logger logger = Logger.getLogger(ClientHandler.class.getName());
+    private static final Map<String, String> userDatabase = new HashMap<>();
     private int points;
-    private String token;
-
+    String token;
     private int queuePosition;
+    static final int MAX_ROUNDS = 5;
+    private boolean isReady;
+    private boolean isTurn;
 
     static {
-        // Adding some dummy users for testing
         userDatabase.put("user1", "password1");
         userDatabase.put("user2", "password2");
+        userDatabase.put("user3", "password3");
+        userDatabase.put("user4", "password4");
     }
 
     public ClientHandler(Socket socket, GameServer server) {
         this.clientSocket = socket;
         this.server = server;
+        this.isReady = false;
+        this.isTurn = false;
         this.points = 0;
     }
 
@@ -47,13 +53,28 @@ public class ClientHandler implements Runnable {
         this.queuePosition = position;
     }
 
+    public void setReady(boolean ready) {
+        isReady = ready;
+    }
+
+    public boolean isReady() {
+        return isReady;
+    }
+
+    public void setTurn(boolean turn) {
+        isTurn = turn;
+    }
+
+    public boolean isTurn() {
+        return isTurn;
+    }
+
     @Override
     public void run() {
         try {
             in = new BufferedReader(new InputStreamReader(clientSocket.getInputStream()));
             out = new PrintWriter(clientSocket.getOutputStream(), true);
 
-            // Handle reconnection
             out.println("Do you have a token? (yes/no)");
             String response = in.readLine().trim();
             if ("yes".equalsIgnoreCase(response)) {
@@ -66,7 +87,6 @@ public class ClientHandler implements Runnable {
                     this.queuePosition = existingClient.getQueuePosition();
                     logger.info("Client reconnected with token: " + this.queuePosition);
                     out.println("Reconnection successful. Type 'exit' to disconnect, or type anything else to echo:");
-                    // Continue with the game or interaction logic
                     handleClientInteraction();
                     return;
                 } else {
@@ -74,16 +94,14 @@ public class ClientHandler implements Runnable {
                 }
             }
 
-            // Handle authentication
             if (authenticate()) {
-                server.addAuthenticatedClient(this);  // Verify the number of players connected and with login done
+                server.addAuthenticatedClient(this);
                 token = UUID.randomUUID().toString();
                 server.addToken(token, this);
                 out.println("Your reconnection token: " + token);
                 out.println("Authentication successful. Type 'exit' to disconnect, or type anything else to echo:");
-                logger.info("Client authenticated: " + clientSocket.getInetAddress());  // Printing the server
+                logger.info("Client authenticated: " + clientSocket.getInetAddress());
 
-                // Handle client interaction
                 handleClientInteraction();
             } else {
                 out.println("Authentication failed. Disconnecting...");
@@ -131,7 +149,7 @@ public class ClientHandler implements Runnable {
             if (server.verifyNumberPlayers()) {
                 logger.info("There are 2 players authenticated, Joining the game function");
                 out.println("Two players authenticated! Joining the game function!");
-                startGame();
+                server.startGame();
                 break;
 
             } else {
@@ -141,17 +159,52 @@ public class ClientHandler implements Runnable {
         }
     }
 
-    private void startGame() throws IOException {
-        String inputLine;
-        while ((inputLine = in.readLine()) != null) {
-            if ("exit".equalsIgnoreCase(inputLine.trim())) {
-                break;
-            }
+    public void playTurn() throws IOException {
+        out.println("It's your turn! Type 'roll' to roll the dice.");
+        setTurn(true);
 
-            out.println("Received: " + inputLine);
-            logger.info("Responding to client, after receiving " + inputLine + " from the client");
-            
+        // Clear any existing input buffer
+        while (in.ready()) {
+            in.readLine();
         }
 
+        long startTime = System.currentTimeMillis();
+        long timeout = 30000; // 30 seconds timeout
+
+        while ((System.currentTimeMillis() - startTime) < timeout) {
+            if (in.ready()) {
+                String inputLine = in.readLine().trim();
+                if ("roll".equalsIgnoreCase(inputLine) && isTurn) {
+                    int roll = new Random().nextInt(6) + 1;
+                    addPoints(roll);
+                    out.println("You rolled a " + roll + ". Your total points: " + getPoints());
+                    setTurn(false);
+                    return;
+                } else {
+                    out.println("Invalid command. Type 'roll' to roll the dice.");
+                }
+            }
+        }
+
+        // If timeout, automatically roll the dice
+        if (isTurn) {
+            int roll = new Random().nextInt(6) + 1;
+            addPoints(roll);
+            out.println("Time's up! Rolling the dice automatically.");
+            out.println("You rolled a " + roll + ". Your total points: " + getPoints());
+            setTurn(false);
+        }
+    }
+
+    public void notifyGameStart() {
+        out.println("Game is starting! Waiting for your turn.");
+    }
+
+    public void notifyGameEnd() {
+        out.println("Game over! Your total points: " + getPoints());
+    }
+
+    public void notifyRoundEnd() {
+        out.println("Round complete. Waiting for other players...");
     }
 }

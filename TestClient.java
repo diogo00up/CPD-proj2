@@ -32,23 +32,16 @@ public class TestClient {
             // If authenticated, handle further commands
             while ((userInput = stdIn.readLine()) != null) {
                 out.println(userInput);
-                String answer = in.readLine();
-                System.out.println("Response from server: " + answer);
-
-                if ("Two players authenticated! Joining the game!".equals(answer)) {
-                    System.out.println("Sending something to the server:");
+                serverResponse = in.readLine();
+                System.out.println("Response from server: " + serverResponse);
+                if ("You are ready. Waiting for other players...".equals(serverResponse) || "Game is starting!".equals(serverResponse)) {
                     continue;
                 }
-
+                if (serverResponse.startsWith("Round") || serverResponse.startsWith("You rolled")) {
+                    continue;
+                }
                 if ("exit".equalsIgnoreCase(userInput)) {
                     break;
-                }
-
-                if (!assister) {
-                    System.out.println("Press any key to start the game!");
-                    assister = true;
-                } else {
-                    System.out.println("Your answer:");
                 }
             }
         } catch (IOException e) {

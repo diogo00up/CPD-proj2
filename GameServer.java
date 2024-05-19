@@ -10,12 +10,14 @@ import java.util.logging.Logger;
 public class GameServer {
     private static final int PORT = 12345;
     private static final int MAX_PLAYERS = 4; // Adjust as needed
+    private static final int MIN_PLAYERS = 2; // Adjust as needed
     private final List<ClientHandler> clients;
-    private final PriorityQueue<ClientHandler> queue = new PriorityQueue<>(Comparator.comparingInt(ClientHandler::getQueuePosition));
+    private final Queue<ClientHandler> queue = new LinkedList<>();
     private final ExecutorService pool;
     private final Map<String, ClientHandler> tokenMap;
-    private final ReentrantLock lock = new ReentrantLock();
+    private final ReentrantLock lock = new ReentrantLock(); // ReentrantLock for synchronizing client interactions
     private static final Logger logger = Logger.getLogger(GameServer.class.getName());
+    private boolean gameRunning;
 
     public GameServer() {
         clients = new ArrayList<>();
@@ -77,12 +79,12 @@ public class GameServer {
         try {
             clients.remove(clientHandler);
             queue.remove(clientHandler);
-            // ... rest of the code ...
+            tokenMap.remove(clientHandler.token);
         } finally {
             lock.unlock();
         }
     }
-    
+
     public void addToken(String token, ClientHandler clientHandler) {
         lock.lock();
         try {
@@ -99,6 +101,65 @@ public class GameServer {
         } finally {
             lock.unlock();
         }
+    }
+
+    public void startGame() {
+        lock.lock();
+        try {
+            if (!gameRunning) {
+                gameRunning = true;
+                clients.forEach(ClientHandler::notifyGameStart);
+                runGameRounds();
+            }
+        } finally {
+            lock.unlock();
+        }
+    }
+
+    private void runGameRounds() {
+        for (int round = 1; round <= ClientHandler.MAX_ROUNDS; round++) {
+            for (ClientHandler client : queue) {
+                lock.lock();
+                try {
+                    client.playTurn();
+                } catch (IOException e) {
+                    logger.log(Level.SEVERE, "Error during client's turn", e);
+                } finally {
+                    lock.unlock();
+                }
+            }
+            notifyRoundEnd();
+        }
+        endGame();
+    }
+
+    private void notifyRoundEnd() {
+        for (ClientHandler client : queue) {
+            client.notifyRoundEnd();
+        }
+    }
+
+    private void endGame() {
+        lock.lock();
+        try {
+            clients.forEach(ClientHandler::notifyGameEnd);
+            gameRunning = false;
+            announceWinner();
+        } finally {
+            lock.unlock();
+        }
+    }
+
+    private void announceWinner() {
+        Optional<ClientHandler> winner = clients.stream().max(Comparator.comparingInt(ClientHandler::getPoints));
+        winner.ifPresent(clientHandler -> {
+            try {
+                clients.forEach(client -> client.out.println("The winner is " + clientHandler.getPoints() + " points."));
+                clientHandler.out.println("Congratulations! You are the winner with " + clientHandler.getPoints() + " points.");
+            } catch (Exception e) {
+                logger.log(Level.SEVERE, "Error announcing winner", e);
+            }
+        });
     }
 
     public static void main(String[] args) {
