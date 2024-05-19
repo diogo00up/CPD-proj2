@@ -17,6 +17,10 @@ public class GameServer {
     private final ReentrantLock lock = new ReentrantLock();
     private static final Logger logger = Logger.getLogger(GameServer.class.getName());
 
+    // Priority Queue to manage client positions
+    private final PriorityQueue<ClientHandler> queue = new PriorityQueue<>(Comparator.comparingInt(ClientHandler::getQueuePosition));
+
+
     public GameServer() {
         clients = new ArrayList<>();
         authenticatedClients = new ArrayList<>();
@@ -50,8 +54,12 @@ public class GameServer {
     public void addAuthenticatedClient(ClientHandler clientHandler) {
         lock.lock();
         try {
-            authenticatedClients.add(clientHandler);
-            logger.info("Number of authenticated clients: " + authenticatedClients.size());
+            if (!authenticatedClients.contains(clientHandler)) {
+                authenticatedClients.add(clientHandler);
+                queue.add(clientHandler); // Add to queue
+                clientHandler.setQueuePosition(queue.size()); // Set position based on queue size
+                logger.info("Number of authenticated clients: " + authenticatedClients.size());
+            }
         } finally {
             lock.unlock();
         }
@@ -75,6 +83,7 @@ public class GameServer {
         try {
             clients.remove(clientHandler);
             authenticatedClients.remove(clientHandler);
+            queue.remove(clientHandler); // Remove from queue
         } finally {
             lock.unlock();
         }
