@@ -17,16 +17,7 @@ public class ClientHandler implements Runnable {
     private int points;
     private String token;
 
-    private int queuePosition; // New variable to track position in the queue
-
-    // Getter and setter for queue position
-    public int getQueuePosition() {
-        return queuePosition;
-    }
-
-    public void setQueuePosition(int position) {
-        this.queuePosition = position;
-    }
+    private int queuePosition;
 
     static {
         // Adding some dummy users for testing
@@ -48,6 +39,14 @@ public class ClientHandler implements Runnable {
         this.points += points;
     }
 
+    public int getQueuePosition() {
+        return queuePosition;
+    }
+    
+    public void setQueuePosition(int position) {
+        this.queuePosition = position;
+    }
+
     @Override
     public void run() {
         try {
@@ -64,9 +63,9 @@ public class ClientHandler implements Runnable {
                 if (existingClient != null) {
                     this.token = reconnectToken;
                     this.points = existingClient.getPoints();
-                    this.queuePosition = existingClient.getQueuePosition(); // Restore queue position
-                    server.addAuthenticatedClient(this);
-                    logger.info("Client reconnected with token and restored position: " + queuePosition);
+                    this.queuePosition = existingClient.getQueuePosition();
+                    logger.info("Client reconnected with token: " + this.queuePosition);
+                    out.println("Reconnection successful. Type 'exit' to disconnect, or type anything else to echo:");
                     // Continue with the game or interaction logic
                     handleClientInteraction();
                     return;
@@ -122,6 +121,7 @@ public class ClientHandler implements Runnable {
     }
 
     private void handleClientInteraction() throws IOException {
+        logger.info("Handling client interaction...");
         String inputLine;
         while ((inputLine = in.readLine()) != null) {
             if ("exit".equalsIgnoreCase(inputLine.trim())) {

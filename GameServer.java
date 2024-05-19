@@ -11,19 +11,14 @@ public class GameServer {
     private static final int PORT = 12345;
     private static final int MAX_PLAYERS = 4; // Adjust as needed
     private final List<ClientHandler> clients;
-    private final List<ClientHandler> authenticatedClients;
+    private final PriorityQueue<ClientHandler> queue = new PriorityQueue<>(Comparator.comparingInt(ClientHandler::getQueuePosition));
     private final ExecutorService pool;
     private final Map<String, ClientHandler> tokenMap;
     private final ReentrantLock lock = new ReentrantLock();
     private static final Logger logger = Logger.getLogger(GameServer.class.getName());
 
-    // Priority Queue to manage client positions
-    private final PriorityQueue<ClientHandler> queue = new PriorityQueue<>(Comparator.comparingInt(ClientHandler::getQueuePosition));
-
-
     public GameServer() {
         clients = new ArrayList<>();
-        authenticatedClients = new ArrayList<>();
         pool = Executors.newVirtualThreadPerTaskExecutor(); // A thread pool to execute tasks concurrently
         tokenMap = new ConcurrentHashMap<>();
     }
@@ -54,11 +49,10 @@ public class GameServer {
     public void addAuthenticatedClient(ClientHandler clientHandler) {
         lock.lock();
         try {
-            if (!authenticatedClients.contains(clientHandler)) {
-                authenticatedClients.add(clientHandler);
-                queue.add(clientHandler); // Add to queue
-                clientHandler.setQueuePosition(queue.size()); // Set position based on queue size
-                logger.info("Number of authenticated clients: " + authenticatedClients.size());
+            if (!queue.contains(clientHandler)) {
+                queue.add(clientHandler);
+                clientHandler.setQueuePosition(queue.size());
+                logger.info("Number of authenticated clients: " + queue.size());
             }
         } finally {
             lock.unlock();
@@ -68,7 +62,7 @@ public class GameServer {
     public boolean verifyNumberPlayers() {
         lock.lock();
         try {
-            if (authenticatedClients.size() >= 2) {
+            if (queue.size() >= 2) {
                 logger.info("THERE ARE AT LEAST 2 SIGNED IN CLIENTS");
                 return true;
             }
@@ -82,13 +76,13 @@ public class GameServer {
         lock.lock();
         try {
             clients.remove(clientHandler);
-            authenticatedClients.remove(clientHandler);
-            queue.remove(clientHandler); // Remove from queue
+            queue.remove(clientHandler);
+            // ... rest of the code ...
         } finally {
             lock.unlock();
         }
     }
-
+    
     public void addToken(String token, ClientHandler clientHandler) {
         lock.lock();
         try {
