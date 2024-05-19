@@ -1,18 +1,21 @@
 import java.io.*;
 import java.net.Socket;
+import java.net.SocketException;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.UUID;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
 public class ClientHandler implements Runnable {
-    private Socket clientSocket;    //The socket connected to the client.
-    private GameServer server;      //Reference to the GameServer instance to manage the client
-    private BufferedReader in;       //BufferedReader for reading input from the client
-    private PrintWriter out;          //PrintWriter for sending output to the client.
-    private static final Logger logger = Logger.getLogger(ClientHandler.class.getName());  //: Logger to log activities related to the client handler.
-    private static Map<String, String> userDatabase = new HashMap<>(); // Mock user database
+    private final Socket clientSocket;    // The socket connected to the client.
+    private final GameServer server;      // Reference to the GameServer instance to manage the client
+    private BufferedReader in;       // BufferedReader for reading input from the client
+    private PrintWriter out;          // PrintWriter for sending output to the client.
+    private static final Logger logger = Logger.getLogger(ClientHandler.class.getName());  // Logger to log activities related to the client handler.
+    private static final Map<String, String> userDatabase = new HashMap<>(); // Mock user database
     private int points;
+    private String token;
 
     static {
         // Adding some dummy users for testing
@@ -34,53 +37,50 @@ public class ClientHandler implements Runnable {
         this.points += points;
     }
 
-
     @Override
     public void run() {
         try {
             in = new BufferedReader(new InputStreamReader(clientSocket.getInputStream()));
             out = new PrintWriter(clientSocket.getOutputStream(), true);
 
+            // Handle reconnection
+            out.println("Do you have a token? (yes/no)");
+            String response = in.readLine().trim();
+            if ("yes".equalsIgnoreCase(response)) {
+                out.println("Enter your token:");
+                String reconnectToken = in.readLine().trim();
+                ClientHandler existingClient = server.getClientByToken(reconnectToken);
+                if (existingClient != null) {
+                    this.token = reconnectToken;
+                    this.points = existingClient.getPoints();
+                    server.addAuthenticatedClient(this);
+                    logger.info("Client reconnected with token: " + reconnectToken);
+                    out.println("Reconnection successful. Type 'exit' to disconnect, or type anything else to echo:");
+                    // Continue with the game or interaction logic
+                    handleClientInteraction();
+                    return;
+                } else {
+                    out.println("Invalid token. Proceeding with normal authentication...");
+                }
+            }
+
             // Handle authentication
             if (authenticate()) {
-                server.addAuthenticatedClient(this);  // verificar o numero de jogadores conectados e com login feito
+                server.addAuthenticatedClient(this);  // Verify the number of players connected and with login done
+                token = UUID.randomUUID().toString();
+                server.addToken(token, this);
+                out.println("Your reconnection token: " + token);
                 out.println("Authentication successful. Type 'exit' to disconnect, or type anything else to echo:");
-                logger.info("Client authenticated: " + clientSocket.getInetAddress());  // printing  the server 
+                logger.info("Client authenticated: " + clientSocket.getInetAddress());  // Printing the server
 
-                // Handle echo commands
-
-                
-                String inputLine;
-                while ((inputLine = in.readLine()) != null) {
-
-                    if ("exit".equalsIgnoreCase(inputLine)) {
-                        break;
-                    }
-
-
-                    //server.verify_number_players();  // a verificar se estao 2 ou mais jogadores conectados
-
-                    if(server.verify_number_players() == true ){
-                        logger.info("ESTAO 2 JOGADORES");
-                        logger.info("Responding to client, after receiving " + inputLine + " from the client");
-                        out.println("Two players authenticated! Joining the game!Receiving the board!");
-                        startGame();
-                        break;
-                    }
-
-                    else{
-                        logger.info("ESTA SO UM JOGADOR");
-                        out.println(inputLine);  
-                        logger.info("Responding to client, after receiving " + inputLine + " from the client");
-                    }
-            
-
-                  
-                }
+                // Handle client interaction
+                handleClientInteraction();
             } else {
                 out.println("Authentication failed. Disconnecting...");
                 logger.warning("Client failed authentication: " + clientSocket.getInetAddress());
             }
+        } catch (SocketException e) {
+            logger.log(Level.SEVERE, "Client connection reset", e);
         } catch (IOException e) {
             logger.log(Level.SEVERE, "Error in client handler", e);
         } finally {
@@ -96,9 +96,9 @@ public class ClientHandler implements Runnable {
 
     private boolean authenticate() throws IOException {
         out.println("Enter username:");
-        String username = in.readLine();
+        String username = in.readLine().trim();
         out.println("Enter password:");
-        String password = in.readLine();
+        String password = in.readLine().trim();
 
         String storedPassword = userDatabase.get(username);
         boolean authenticated = storedPassword != null && storedPassword.equals(password);
@@ -110,16 +110,33 @@ public class ClientHandler implements Runnable {
         return authenticated;
     }
 
+    private void handleClientInteraction() throws IOException {
+        String inputLine;
+        while ((inputLine = in.readLine()) != null) {
+            if ("exit".equalsIgnoreCase(inputLine.trim())) {
+                break;
+            }
+
+            if (server.verifyNumberPlayers()) {
+                logger.info("There are 2 players authenticated");
+                out.println("Two players authenticated! Joining the game! Receiving the board!");
+                startGame();
+                break;
+            } else {
+                out.println(inputLine);
+                logger.info("Responding to client, after receiving " + inputLine + " from the client");
+            }
+        }
+    }
+
     private void startGame() throws IOException {
         for (int i = 1; i <= 4; i++) {
             String inputLine = in.readLine();
             if (inputLine == null) {
-                logger.info("ITS A NULL ");
+                logger.info("Received null input, breaking...");
                 break;
             }
             logger.info("Responding to client, after receiving " + inputLine + " from the client");
-            // Process the input and update points
-            // Here, we assume some logic to calculate points
             addPoints(10); // Example of adding points
             out.println("Your current: " + inputLine);
         }
@@ -127,11 +144,8 @@ public class ClientHandler implements Runnable {
         // After the game, notify the client about their points
         out.println("Game over! Your points: " + getPoints());
 
-
         clientSocket.close();
         server.removeClient(this);
         logger.info("Client disconnected: " + clientSocket.getInetAddress());
     }
-
 }
-
