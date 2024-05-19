@@ -33,8 +33,13 @@ public class GameServer {
                 Socket clientSocket = serverSocket.accept();
                 logger.info("New client connected: " + clientSocket.getInetAddress());  // New connection, it logs the connection
                 ClientHandler clientHandler = new ClientHandler(clientSocket, this);  // Creates a ClientHandler for the client
-                clients.add(clientHandler);
-                logger.info("Number of connected clients: " + clients.size()); // Log the number of connected clients
+                lock.lock();
+                try {
+                    clients.add(clientHandler);
+                    logger.info("Number of connected clients: " + clients.size()); // Log the number of connected clients
+                } finally {
+                    lock.unlock();
+                }
                 pool.execute(clientHandler);  // Submits the handler to the thread pool for execution
             }
         } catch (IOException e) {
@@ -76,11 +81,21 @@ public class GameServer {
     }
 
     public void addToken(String token, ClientHandler clientHandler) {
-        tokenMap.put(token, clientHandler);
+        lock.lock();
+        try {
+            tokenMap.put(token, clientHandler);
+        } finally {
+            lock.unlock();
+        }
     }
 
     public ClientHandler getClientByToken(String token) {
-        return tokenMap.get(token);
+        lock.lock();
+        try {
+            return tokenMap.get(token);
+        } finally {
+            lock.unlock();
+        }
     }
 
     public static void main(String[] args) {
