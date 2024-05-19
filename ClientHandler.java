@@ -17,6 +17,17 @@ public class ClientHandler implements Runnable {
     private int points;
     private String token;
 
+    private int queuePosition; // New variable to track position in the queue
+
+    // Getter and setter for queue position
+    public int getQueuePosition() {
+        return queuePosition;
+    }
+
+    public void setQueuePosition(int position) {
+        this.queuePosition = position;
+    }
+
     static {
         // Adding some dummy users for testing
         userDatabase.put("user1", "password1");
@@ -53,9 +64,9 @@ public class ClientHandler implements Runnable {
                 if (existingClient != null) {
                     this.token = reconnectToken;
                     this.points = existingClient.getPoints();
+                    this.queuePosition = existingClient.getQueuePosition(); // Restore queue position
                     server.addAuthenticatedClient(this);
-                    logger.info("Client reconnected with token: " + reconnectToken);
-                    out.println("Reconnection successful. Type 'exit' to disconnect, or type anything else to echo:");
+                    logger.info("Client reconnected with token and restored position: " + queuePosition);
                     // Continue with the game or interaction logic
                     handleClientInteraction();
                     return;
