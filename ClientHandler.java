@@ -118,34 +118,29 @@ public class ClientHandler implements Runnable {
             }
 
             if (server.verifyNumberPlayers()) {
-                logger.info("There are 2 players authenticated");
-                out.println("Two players authenticated! Joining the game! Receiving the board!");
+                logger.info("There are 2 players authenticated, Joining the game function");
+                out.println("Two players authenticated! Joining the game function!");
                 startGame();
                 break;
+
             } else {
-                out.println(inputLine);
+                out.println("Received: " + inputLine);
                 logger.info("Responding to client, after receiving " + inputLine + " from the client");
             }
         }
     }
 
     private void startGame() throws IOException {
-        for (int i = 1; i <= 4; i++) {
-            String inputLine = in.readLine();
-            if (inputLine == null) {
-                logger.info("Received null input, breaking...");
+        String inputLine;
+        while ((inputLine = in.readLine()) != null) {
+            if ("exit".equalsIgnoreCase(inputLine.trim())) {
                 break;
             }
+
+            out.println("Received: " + inputLine);
             logger.info("Responding to client, after receiving " + inputLine + " from the client");
-            addPoints(10); // Example of adding points
-            out.println("Your current: " + inputLine);
+            
         }
 
-        // After the game, notify the client about their points
-        out.println("Game over! Your points: " + getPoints());
-
-        clientSocket.close();
-        server.removeClient(this);
-        logger.info("Client disconnected: " + clientSocket.getInetAddress());
     }
 }
