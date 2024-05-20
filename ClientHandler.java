@@ -6,6 +6,7 @@ import java.util.Map;
 import java.util.UUID;
 import java.util.logging.Level;
 import java.util.logging.Logger;
+import java.util.Random;
 
 public class ClientHandler implements Runnable {
     private final Socket clientSocket;    // The socket connected to the client.
@@ -16,7 +17,6 @@ public class ClientHandler implements Runnable {
     private static final Map<String, String> userDatabase = new HashMap<>(); // Mock user database
     private int points;
     private String token;
-
     private int queuePosition;
 
     static {
@@ -42,10 +42,16 @@ public class ClientHandler implements Runnable {
     public int getQueuePosition() {
         return queuePosition;
     }
+
+    public String getToken() {
+        return token;
+    }
+    
     
     public void setQueuePosition(int position) {
         this.queuePosition = position;
     }
+
 
     @Override
     public void run() {
@@ -64,7 +70,7 @@ public class ClientHandler implements Runnable {
                     this.token = reconnectToken;
                     this.points = existingClient.getPoints();
                     this.queuePosition = existingClient.getQueuePosition();
-                    logger.info("Client reconnected with token: " + this.queuePosition);
+                    logger.info("Client reconnected with position " + this.queuePosition);
                     out.println("Reconnection successful. Type 'exit' to disconnect, or type anything else to echo:");
                     // Continue with the game or interaction logic
                     handleClientInteraction();
@@ -124,6 +130,8 @@ public class ClientHandler implements Runnable {
         logger.info("Handling client interaction...");
         String inputLine;
         while ((inputLine = in.readLine()) != null) {
+            server.waitForTurn(queuePosition == 1); // Wait for the turn
+
             if ("exit".equalsIgnoreCase(inputLine.trim())) {
                 break;
             }
@@ -138,20 +146,50 @@ public class ClientHandler implements Runnable {
                 out.println("Received: " + inputLine);
                 logger.info("Responding to client, after receiving " + inputLine + " from the client");
             }
+
+            server.signalTurn(queuePosition == 1); // Signal turn for the other thread
+        }
+    }
+
+    public void closeConnection() {
+        try {
+            if (clientSocket != null && !clientSocket.isClosed()) {
+                clientSocket.close();
+            }
+            logger.info("Connection closed for client: " + clientSocket.getInetAddress());
+        } catch (IOException e) {
+            logger.log(Level.SEVERE, "Error closing client socket", e);
         }
     }
 
     private void startGame() throws IOException {
         String inputLine;
+        int counter=0;
         while ((inputLine = in.readLine()) != null) {
+            if(counter==3){
+                break;
+            }
+            server.waitForTurn(queuePosition == 1); // Wait for the turn
+
             if ("exit".equalsIgnoreCase(inputLine.trim())) {
                 break;
             }
 
+
+            counter++;
+            Random random = new Random();
+            points += random.nextInt(2);
             out.println("Received: " + inputLine);
             logger.info("Responding to client, after receiving " + inputLine + " from the client");
-            
+
+            server.signalTurn(queuePosition == 1); // Signal turn for the other thread
         }
+
+
+        out.println("GAME FISNISHED! PLAYER " +  server.getPlayerWithMostPoints().getToken() + "won with the  most points");
+        this.closeConnection();
+     
+        
 
     }
 }

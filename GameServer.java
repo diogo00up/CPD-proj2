@@ -4,6 +4,7 @@ import java.net.Socket;
 import java.util.*;
 import java.util.concurrent.*;
 import java.util.concurrent.locks.ReentrantLock;
+import java.util.concurrent.locks.Condition;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
@@ -15,11 +16,13 @@ public class GameServer {
     private final ExecutorService pool;
     private final Map<String, ClientHandler> tokenMap;
     private final ReentrantLock lock = new ReentrantLock();
+    private final Condition interactionCondition = lock.newCondition();
+    private boolean firstThreadTurn = true; // To track whose turn it is
     private static final Logger logger = Logger.getLogger(GameServer.class.getName());
 
     public GameServer() {
         clients = new ArrayList<>();
-        pool = Executors.newVirtualThreadPerTaskExecutor(); // A thread pool to execute tasks concurrently
+        pool = Executors.newFixedThreadPool(MAX_PLAYERS); // A thread pool to execute tasks concurrently
         tokenMap = new ConcurrentHashMap<>();
     }
 
@@ -72,6 +75,25 @@ public class GameServer {
         }
     }
 
+    public ClientHandler getPlayerWithMostPoints() {
+        lock.lock();
+        try {
+            ClientHandler topPlayer = null;
+            int highestPoints = 0;
+
+            for (ClientHandler client : queue) {
+                if (client.getPoints() > highestPoints) {
+                    highestPoints = client.getPoints();
+                    topPlayer = client;
+                }
+            }
+            
+            return topPlayer;
+        } finally {
+            lock.unlock();
+        }
+    }
+
     public void removeClient(ClientHandler clientHandler) {
         lock.lock();
         try {
@@ -101,8 +123,47 @@ public class GameServer {
         }
     }
 
+    public void waitForTurn(boolean isFirstThread) {
+        lock.lock();
+        try {
+            while (firstThreadTurn != isFirstThread) {
+                interactionCondition.await();
+            }
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        } finally {
+            lock.unlock();
+        }
+    }
+
+    public void signalTurn(boolean isFirstThread) {
+        lock.lock();
+        try {
+            firstThreadTurn = !isFirstThread;
+            interactionCondition.signalAll();
+        } finally {
+            lock.unlock();
+        }
+    }
+
     public static void main(String[] args) {
         GameServer server = new GameServer();
         server.start();
+    }
+
+    public void closeAllConnections() {
+        lock.lock();
+        try {
+            pool.shutdown();
+            if (!pool.awaitTermination(60, TimeUnit.SECONDS)) {
+                pool.shutdownNow();
+            }
+            logger.info("All client connections closed and server shutdown.");
+        } catch (InterruptedException e) {
+            pool.shutdownNow();
+            Thread.currentThread().interrupt();
+        } finally {
+            lock.unlock();
+        }
     }
 }
